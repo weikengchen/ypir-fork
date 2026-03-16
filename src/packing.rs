@@ -1,4 +1,6 @@
-use std::{arch::x86_64::*, time::Instant};
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+use std::time::Instant;
 
 use log::debug;
 
@@ -678,6 +680,7 @@ pub fn fast_add_into(res: &mut PolyMatrixNTT, a: &PolyMatrixNTT) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn fast_multiply_no_reduce(
     params: &Params,
     res: &mut PolyMatrixNTT,
@@ -728,6 +731,48 @@ pub fn fast_multiply_no_reduce(
     }
 }
 
+#[cfg(not(target_arch = "x86_64"))]
+pub fn fast_multiply_no_reduce(
+    params: &Params,
+    res: &mut PolyMatrixNTT,
+    a: &PolyMatrixNTT,
+    b: &PolyMatrixNTT,
+    _start_inner_dim: usize,
+) {
+    assert_eq!(res.rows, a.rows);
+    assert_eq!(res.cols, b.cols);
+    assert_eq!(res.rows, 1);
+    assert_eq!(res.cols, 1);
+
+    assert_eq!(a.cols, b.rows);
+    assert_eq!(params.crt_count * params.poly_len, 2 * 2048);
+
+    let a_slc = a.as_slice();
+    let b_slc = b.as_slice();
+    let res_slc = res.as_mut_slice();
+    let pol_sz = params.poly_len;
+
+    for idx in 0..pol_sz {
+        let mut sum_lo: u64 = 0;
+        let mut sum_hi: u64 = 0;
+        for k in 0..a.cols {
+            let x = a_slc[k * 2 * pol_sz + idx];
+            let y = b_slc[k * 2 * pol_sz + idx];
+
+            let x_lo = x & 0xFFFF_FFFF;
+            let x_hi = x >> 32;
+            let y_lo = y & 0xFFFF_FFFF;
+            let y_hi = y >> 32;
+
+            sum_lo = sum_lo.wrapping_add(x_lo.wrapping_mul(y_lo));
+            sum_hi = sum_hi.wrapping_add(x_hi.wrapping_mul(y_hi));
+        }
+
+        res_slc[idx] = sum_lo;
+        res_slc[pol_sz + idx] = sum_hi;
+    }
+}
+
 pub fn condense_matrix<'a>(params: &'a Params, a: &PolyMatrixNTT<'a>) -> PolyMatrixNTT<'a> {
     let mut res = PolyMatrixNTT::zero(params, a.rows, a.cols);
     for i in 0..a.rows {
@@ -757,6 +802,7 @@ pub fn uncondense_matrix<'a>(params: &'a Params, a: &PolyMatrixNTT<'a>) -> PolyM
     res
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn multiply_add_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[u64]) {
     unsafe {
         let a_ptr = a.as_ptr();
@@ -779,6 +825,17 @@ pub fn multiply_add_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[
     }
 }
 
+#[cfg(not(target_arch = "x86_64"))]
+pub fn multiply_add_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[u64]) {
+    for i in 0..res.len() {
+        // _mm512_mul_epu32 multiplies the low 32 bits of each 64-bit lane
+        let a_lo = a[i] & 0xFFFF_FFFF;
+        let b_lo = b[i] & 0xFFFF_FFFF;
+        res[i] = res[i].wrapping_add(a_lo.wrapping_mul(b_lo));
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 pub fn multiply_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[u64]) {
     unsafe {
         let a_ptr = a.as_ptr();
@@ -796,6 +853,39 @@ pub fn multiply_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[u64]
             let product = _mm512_mul_epu32(x, y);
 
             _mm512_store_si512(p_z as *mut _, product);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn multiply_poly_avx(_params: &Params, res: &mut [u64], a: &[u64], b: &[u64]) {
+    for i in 0..res.len() {
+        let a_lo = a[i] & 0xFFFF_FFFF;
+        let b_lo = b[i] & 0xFFFF_FFFF;
+        res[i] = a_lo.wrapping_mul(b_lo);
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn multiply_no_reduce(
+    res: &mut PolyMatrixNTT,
+    a: &PolyMatrixNTT,
+    b: &PolyMatrixNTT,
+    start_inner_dim: usize,
+) {
+    assert_eq!(res.rows, a.rows);
+    assert_eq!(res.cols, b.cols);
+    assert_eq!(a.cols, b.rows);
+
+    let params = res.params;
+    for i in 0..a.rows {
+        for j in 0..b.cols {
+            let res_poly = res.get_poly_mut(i, j);
+            for k in start_inner_dim..a.cols {
+                let pol1 = a.get_poly(i, k);
+                let pol2 = b.get_poly(k, j);
+                multiply_add_poly_avx(params, res_poly, pol1, pol2);
+            }
         }
     }
 }
