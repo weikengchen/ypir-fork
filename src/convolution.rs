@@ -119,7 +119,7 @@ pub fn naive_negacyclic_convolve(a: &[u32], b: &[u32]) -> Vec<u32> {
             if i < j {
                 b_val = b_val.wrapping_neg();
             }
-            res[i] += a[j] * b_val;
+            res[i] = res[i].wrapping_add(a[j].wrapping_mul(b_val));
         }
     }
     res

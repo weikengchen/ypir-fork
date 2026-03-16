@@ -1,9 +1,14 @@
+#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
 use spiral_rs::{arith::*, params::*};
 
+#[cfg(target_arch = "x86_64")]
 use super::server::ToM512;
+#[cfg(not(target_arch = "x86_64"))]
+use super::server::ToU64;
 
+#[cfg(target_arch = "x86_64")]
 pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy>(
     params: &Params,
     c: &mut [u64],
@@ -17,23 +22,14 @@ pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy>(
 {
     assert_eq!(a_elems, b_rows);
 
-    // debug!("Multiplying {}x{} by {}x{}", K, a_elems, b_rows, b_cols);
-
     let simd_width = 8;
 
     let chunk_size = (8192 / K.next_power_of_two()).min(a_elems / simd_width);
     let num_chunks = (a_elems / simd_width) / chunk_size;
-    // debug!("k_chunk_size: {}, k_num_chunks: {}", chunk_size, num_chunks);
 
     let j_chunk_size = 1;
     let j_num_chunks = b_cols / j_chunk_size;
-    // debug!(
-    //     "j_chunk_size: {}, j_num_chunks: {}",
-    //     j_chunk_size, j_num_chunks
-    // );
 
-    // let mut result = AlignedMemory64::new(b_cols);
-    // let res_mut_slc = result.as_mut_slice();
     let res_mut_slc = c;
 
     unsafe {
@@ -42,7 +38,6 @@ pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy>(
             *slc_mut = chunk;
         }
 
-        // let a_ptr = a.as_ptr();
         let b_ptr = b_t.as_ptr();
 
         for k_outer in 0..num_chunks {
@@ -112,20 +107,69 @@ pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy>(
                             + values_hi[6]
                             + values_hi[7];
 
-                        // res_mut_slc[j] = res_lo + res_hi;
-
                         let (lo, hi) = (
                             barrett_coeff_u64(params, res_lo as u64, 0),
                             barrett_coeff_u64(params, res_hi as u64, 1),
                         );
-
-                        // res_mut_slc[j] = lo | (hi << 32);
 
                         let res = params.crt_compose_2(lo, hi);
                         res_mut_slc[j] = barrett_u64(params, res_mut_slc[j] + res);
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy + ToU64>(
+    params: &Params,
+    c: &mut [u64],
+    a: &[u64],
+    a_elems: usize,
+    b_t: &[T], // transposed
+    b_rows: usize,
+    b_cols: usize,
+) {
+    assert_eq!(a_elems, b_rows);
+
+    let mut a_slcs: [&[u64]; K] = [&[]; K];
+    for (slc_mut, chunk) in a_slcs.iter_mut().zip(a.chunks_exact(a.len() / K)) {
+        *slc_mut = chunk;
+    }
+
+    let res_mut_slc = c;
+
+    for j in 0..b_cols {
+        let mut total_sum_lo = [0u128; K];
+        let mut total_sum_hi = [0u128; K];
+
+        for k in 0..a_elems {
+            let b_idx = j * b_rows + k;
+            let b_val = b_t[b_idx].to_u64();
+
+            for batch in 0..K {
+                let a_val = a_slcs[batch][k];
+                let a_lo = a_val & 0xFFFF_FFFF;
+                let a_hi = a_val >> 32;
+
+                total_sum_lo[batch] += (a_lo as u128) * (b_val as u128);
+                total_sum_hi[batch] += (a_hi as u128) * (b_val as u128);
+            }
+        }
+
+        let res_mut_slcs = res_mut_slc.chunks_exact_mut(res_mut_slc.len() / K);
+        for (batch, res_mut_slc) in (0..K).zip(res_mut_slcs) {
+            let res_lo = total_sum_lo[batch] as u64;
+            let res_hi = total_sum_hi[batch] as u64;
+
+            let (lo, hi) = (
+                barrett_coeff_u64(params, res_lo, 0),
+                barrett_coeff_u64(params, res_hi, 1),
+            );
+
+            let res = params.crt_compose_2(lo, hi);
+            res_mut_slc[j] = barrett_u64(params, res_mut_slc[j] + res);
         }
     }
 }
@@ -165,8 +209,6 @@ mod test {
                 unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u16, b.len() * 4) };
 
             let now = Instant::now();
-            // fast_dot_product_avx512(&params, a.as_slice(), rows, b_as_t_slice, rows, cols);
-            // fast_dot_product_avx512_fastest(&params, a.as_slice(), rows, b_as_t_slice, rows, cols);
             fast_batched_dot_product_avx512::<A_ROWS, _>(
                 &params,
                 c.as_mut_slice(),
