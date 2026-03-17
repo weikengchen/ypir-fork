@@ -1,0 +1,26 @@
+[package]
+name = "ypir-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Enable server feature for native tests that need YServer
+server-test = ["ypir/server"]
+
+[dependencies]
+ypir = { path = "..", default-features = false }
+spiral-rs = { git = "https://github.com/weikengchen/spiral-rs-fork.git", default-features = false }
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+rand_chacha = "0.3"
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Performance", "console"] }

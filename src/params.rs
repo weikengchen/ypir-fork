@@ -8,7 +8,7 @@ use super::lwe::LWEParams;
 static DEFAULT_MODULI: [u64; 2] = [268369921u64, 249561089u64];
 const DEF_MOD_STR: &str = "[\"268369921\", \"249561089\"]";
 
-fn ext_params_from_json(json_str: &str) -> Params {
+pub fn ext_params_from_json(json_str: &str) -> Params {
     let v: Value = serde_json::from_str(json_str).unwrap();
 
     let n = v["n"].as_u64().unwrap() as usize;

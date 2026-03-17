@@ -120,9 +120,10 @@ pub struct YPIRSchemeParams {
     pub t: f64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for YPIRSchemeParams {
     fn default() -> Self {
-        let max_db_bits = 64 * (1 << 33); // 64 GB
+        let max_db_bits = 64 * (1usize << 33); // 64 GB
         let lwe_params = LWEParams::default();
         let params = params_for_scenario(max_db_bits, 1);
         Self::from_params(&params, &lwe_params)

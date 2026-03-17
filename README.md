@@ -16,10 +16,72 @@ Our benchmarks were collected using the AWS `r6i.16xlarge` instance type, which 
 3. Run `git clone https://github.com/menonsamir/ypir.git` and `cd ypir`.
 4. Run `cargo run --release -- 1073741824` to run YPIR on a random database consisting of 1073741824 bits (~134 MB).
 The first time you run this command, Cargo will download and install the necessary libraries to build the code (~2 minutes);
-later calls will not take as long. Stability warnings can be safely ignored. 
+later calls will not take as long. Stability warnings can be safely ignored.
 See below for details on how to interpret the measurements.
 
 We have tested the above steps on a fresh AWS `r6i.16xlarge` Ubuntu 22.04 instance and confirmed they work.
+
+## WASM Client
+
+The `ypir-wasm/` crate provides a WebAssembly-compatible client that can run in browsers or Node.js. This allows the PIR client (query generation and response decoding) to run entirely in the browser while the server runs natively.
+
+### API
+
+The WASM client exposes three functions:
+
+- **`ypir_client_init(params_json: &str) -> YpirWasmClient`** — Initialize a client from a JSON params string (provided by the server).
+- **`ypir_generate_query(client: &mut YpirWasmClient, target_row: usize) -> Vec<u8>`** — Generate an encrypted query for the given row index. Returns serialized bytes containing the packed query and condensed public parameters.
+- **`ypir_decode_response(client: &YpirWasmClient, response_bytes: &[u8]) -> Vec<u8>`** — Decrypt a server response into plaintext bytes.
+
+### Native (Rust) integration
+
+For Rust consumers (e.g., a server that needs to process queries from WASM clients), `ypir-wasm` also provides native helper functions (available on non-wasm targets):
+
+- **`params_to_json(params: &Params) -> String`** — Serialize `Params` to the JSON format expected by `ypir_client_init`.
+- **`deserialize_query(params: &Params, query_bytes: &[u8]) -> (Vec<u64>, Vec<PolyMatrixNTT>)`** — Deserialize the query bytes produced by `ypir_generate_query` into the packed query and condensed public parameters needed by the server.
+- **`serialize_response(response: &[Vec<u8>]) -> Vec<u8>`** — Flatten a server response into the byte format expected by `ypir_decode_response`.
+
+### Query wire format
+
+The query bytes returned by `ypir_generate_query` use a length-prefixed binary format:
+
+```
+[4B LE u32] packed_query.len() (number of u64 elements)
+[N×8 bytes] packed_query data (u64 little-endian)
+[4B LE u32] num_pub_params
+For each pub_param:
+  [4B LE u32] rows
+  [4B LE u32] cols
+  [4B LE u32] data.len() (number of u64 elements)
+  [M×8 bytes] polynomial matrix data (u64 little-endian)
+```
+
+### Building for WASM
+
+```bash
+# Install dependencies
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+# Build the WASM package
+cd ypir-wasm
+wasm-pack build --target web --release
+
+# Run WASM tests (Node.js)
+RUSTFLAGS='-C target-feature=+reference-types' wasm-pack test --node --release -- --test wasm_test
+
+# Run native roundtrip tests (requires server feature)
+cargo test --release --features server-test -- --nocapture
+```
+
+### Protocol flow
+
+A typical integration looks like:
+
+1. **Server** derives params via `params_for_scenario_simplepir(num_rows, total_size)`, serializes with `ypir_wasm::params_to_json(&params)`, and sends the JSON to the client.
+2. **Client (WASM)** calls `ypir_client_init(params_json)` then `ypir_generate_query(&mut client, target_row)` and sends the query bytes to the server.
+3. **Server** calls `ypir_wasm::deserialize_query(&params, &query_bytes)` to get the packed query and pub params, runs `y_server.perform_online_computation_simplepir(...)`, and sends the flattened response bytes back via `ypir_wasm::serialize_response(&response)`.
+4. **Client (WASM)** calls `ypir_decode_response(&client, &response_bytes)` to get the plaintext row data.
 
 ### Options
 To pass arguments, make sure to run `cargo run --release -- <ARGS>` (the ` -- ` is important).
@@ -60,30 +122,30 @@ This is an annotated version of the output, detailing what each measurement mean
 
     // Bytes downloaded by the client in the offline phase
     "downloadBytes": 0,
-    
-    // Server computation time, in milliseconds, in the offline phase. 
+
+    // Server computation time, in milliseconds, in the offline phase.
     // Includes any precomputation that must be performed on the plaintext database.
     "serverTimeMs": 3965,
-    
+
     // Not used.
     "clientTimeMs": 0,
-    
+
     // Time spent precomputing just the SimplePIR hint.
     "simplepirPrepTimeMs": 2539,
 
     // Bytes that the client *would* have to download, in the offline phase,
-    // if they were performing SimplePIR (rather than YPIR) 
+    // if they were performing SimplePIR (rather than YPIR)
     // using this implementation (SimplePIR* in the paper).
     "simplepirHintBytes": 29360128,
 
-    // Similarly, bytes that the client *would* have to download, 
+    // Similarly, bytes that the client *would* have to download,
     // in the offline phase DoublePIR (DoublePIR* in the paper).
     "doublepirHintBytes": 14680064
   },
   "online": {
     // Bytes uploaded by a single client in the online phase.
     "uploadBytes": 604160,
-    
+
     // Bytes downloaded by a single client in the online phase.
     "downloadBytes": 12288,
 

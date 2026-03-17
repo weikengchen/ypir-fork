@@ -1,6 +1,32 @@
 use spiral_rs::{arith::*, params::*, poly::*, util};
 
-use super::server::ToU64;
+pub trait ToU64 {
+    fn to_u64(self) -> u64;
+}
+
+impl ToU64 for u8 {
+    fn to_u64(self) -> u64 {
+        self as u64
+    }
+}
+
+impl ToU64 for u16 {
+    fn to_u64(self) -> u64 {
+        self as u64
+    }
+}
+
+impl ToU64 for u32 {
+    fn to_u64(self) -> u64 {
+        self as u64
+    }
+}
+
+impl ToU64 for u64 {
+    fn to_u64(self) -> u64 {
+        self
+    }
+}
 
 pub fn negacyclic_perm(a: &[u64], shift: usize, modulus: u64) -> Vec<u64> {
     let n = a.len();
@@ -201,7 +227,7 @@ where
     result_u64
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod test {
     use spiral_rs::poly::*;
 

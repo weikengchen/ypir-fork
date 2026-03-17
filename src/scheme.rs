@@ -1,19 +1,31 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use log::debug;
+#[cfg(feature = "server")]
 use rand::{thread_rng, Rng, SeedableRng};
+#[cfg(feature = "server")]
 use rand_chacha::ChaCha20Rng;
 
+#[cfg(feature = "server")]
 use spiral_rs::aligned_memory::AlignedMemory64;
+#[cfg(feature = "server")]
 use spiral_rs::arith::rescale;
+#[cfg(feature = "server")]
 use spiral_rs::poly::{PolyMatrix, PolyMatrixRaw};
+#[cfg(feature = "server")]
 use spiral_rs::{client::*, params::*};
 
+#[cfg(feature = "server")]
 use crate::bits::{read_bits, u64s_to_contiguous_bytes};
+#[cfg(feature = "server")]
 use crate::modulus_switch::ModulusSwitch;
+#[cfg(feature = "server")]
 use crate::noise_analysis::YPIRSchemeParams;
+#[cfg(feature = "server")]
 use crate::packing::condense_matrix;
 
+#[cfg(feature = "server")]
 use super::{client::*, lwe::LWEParams, measurement::*, params::*, server::*};
 
 pub const STATIC_PUBLIC_SEED: [u8; 32] = [0u8; 32];
@@ -24,6 +36,23 @@ pub const STATIC_SEED_2: [u8; 32] = [
     2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
+pub trait Sample {
+    fn sample() -> Self;
+}
+
+impl Sample for u8 {
+    fn sample() -> Self {
+        fastrand::u8(..)
+    }
+}
+
+impl Sample for u16 {
+    fn sample() -> Self {
+        fastrand::u16(..)
+    }
+}
+
+#[cfg(feature = "server")]
 pub fn run_ypir_batched(
     num_items: usize,
     item_size_bits: usize,
@@ -55,22 +84,7 @@ pub fn run_ypir_batched(
     measurement
 }
 
-pub trait Sample {
-    fn sample() -> Self;
-}
-
-impl Sample for u8 {
-    fn sample() -> Self {
-        fastrand::u8(..)
-    }
-}
-
-impl Sample for u16 {
-    fn sample() -> Self {
-        fastrand::u16(..)
-    }
-}
-
+#[cfg(feature = "server")]
 pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) -> Measurement {
     assert_eq!(K, 1); // for now
 
@@ -85,9 +99,6 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
     let rlwe_q_prime_1 = params.get_q_prime_1();
     let rlwe_q_prime_2 = params.get_q_prime_2();
 
-    // The number of bits represented by a plaintext RLWE coefficient
-    // let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
-
     let num_rlwe_outputs = db_cols / params.poly_len;
 
     // --
@@ -101,10 +112,6 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
         "Database of {} bytes",
         y_server.db().len() * (params.pt_modulus as f64).log2().ceil() as usize / 8
     );
-    // assert_eq!(
-    //     y_server.db().len() * std::mem::size_of::<T>(),
-    //     db_rows_padded * db_cols * (params.pt_modulus as f64).log2().ceil() as usize / 8
-    // );
     assert_eq!(y_server.db().len(), db_rows_padded * db_cols);
 
     // ================================================================
@@ -118,7 +125,6 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
     let offline_server_time_ms = start_offline_comp.elapsed().as_millis();
 
     let packed_query_row_sz = params.db_rows_padded();
-    // let mut all_queries_packed = AlignedMemory64::new(K * packed_query_row_sz);
 
     for trial in 0..trials + 1 {
         debug!("trial: {}", trial);
@@ -153,7 +159,6 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
                 &mut ChaCha20Rng::from_entropy(),
                 &mut ChaCha20Rng::from_seed(STATIC_SEED_2),
             );
-            // let pub_params_size = get_vec_pm_size_bytes(&pack_pub_params) / 2;
             let mut pack_pub_params_row_1s = pack_pub_params.to_vec();
             for i in 0..pack_pub_params.len() {
                 pack_pub_params_row_1s[i] =
@@ -209,7 +214,7 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
             Some(&mut measurement),
         )];
         let online_server_time_ms = start_online_comp.elapsed().as_millis();
-        let online_download_bytes = get_size_bytes(&responses); // TODO: this is not quite right for multiple clients
+        let online_download_bytes = get_size_bytes(&responses);
 
         // check correctness
         for (response_switched, (y_client, target_idx, _, _)) in
@@ -221,12 +226,6 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
                 .iter()
                 .map(|x| x.to_u64())
                 .collect::<Vec<_>>();
-
-            // let scheme_params = YPIRSchemeParams::from_params(&params, &lwe_params);
-            // let log2_corr_err = scheme_params.delta().log2();
-            // let log2_expected_outer_noise = scheme_params.expected_outer_noise().log2();
-            // debug!("log2_correctness_err: {}", log2_corr_err);
-            // debug!("log2_expected_outer_noise: {}", log2_expected_outer_noise);
 
             let start_decode = Instant::now();
 
@@ -247,14 +246,9 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
                 })
                 .collect::<Vec<_>>();
             assert_eq!(outer_ct.len(), num_rlwe_outputs * params.poly_len);
-            // debug!("outer_ct: {:?}", &outer_ct[..]);
-            // let outer_ct_t_u8 = u64s_to_contiguous_bytes(&outer_ct, pt_bits);
             let final_result = outer_ct.as_slice();
             measurement.online.client_decode_time_ms = start_decode.elapsed().as_millis() as usize;
 
-            // debug!("got      {:?}", &final_result[..256]);
-            // debug!("expected {:?}", &corr_result[..256]);
-            // debug!("got {:?}, expected {:?}", &final_result[..256], &corr_result[..256]);
             assert_eq!(final_result, corr_result);
         }
 
@@ -288,6 +282,7 @@ pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) 
     final_measurement
 }
 
+#[cfg(feature = "server")]
 pub fn run_ypir_on_params<const K: usize>(
     params: Params,
     is_simplepir: bool,
@@ -315,7 +310,6 @@ pub fn run_ypir_on_params<const K: usize>(
 
     // The number of bits represented by a plaintext RLWE coefficient
     let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
-    // assert_eq!(pt_bits, 16);
 
     // The factor by which ciphertext values are bigger than plaintext values
     let blowup_factor = lwe_q_prime_bits as f64 / pt_bits as f64;
@@ -401,7 +395,6 @@ pub fn run_ypir_on_params<const K: usize>(
     let offline_server_time_ms = start_offline_comp.elapsed().as_millis();
 
     let packed_query_row_sz = params.db_rows_padded();
-    // let mut all_queries_packed = AlignedMemory64::new(K * packed_query_row_sz);
 
     for trial in 0..trials + 1 {
         debug!("trial: {}", trial);
@@ -442,7 +435,6 @@ pub fn run_ypir_on_params<const K: usize>(
                 &mut ChaCha20Rng::from_entropy(),
                 &mut ChaCha20Rng::from_seed(STATIC_SEED_2),
             );
-            // let pub_params_size = get_vec_pm_size_bytes(&pack_pub_params) / 2;
             let mut pack_pub_params_row_1s = pack_pub_params.to_vec();
             for i in 0..pack_pub_params.len() {
                 pack_pub_params_row_1s[i] =
@@ -513,7 +505,7 @@ pub fn run_ypir_on_params<const K: usize>(
             Some(&mut measurement),
         );
         let online_server_time_ms = start_online_comp.elapsed().as_millis();
-        let online_download_bytes = get_size_bytes(&responses); // TODO: this is not quite right for multiple clients
+        let online_download_bytes = get_size_bytes(&responses);
 
         // check correctness
         for (response_switched, (y_client, target_idx, _, _, _)) in
@@ -547,7 +539,6 @@ pub fn run_ypir_on_params<const K: usize>(
                 })
                 .collect::<Vec<_>>();
             assert_eq!(outer_ct.len(), out_rows);
-            // debug!("outer_ct: {:?}", &outer_ct[..]);
             let outer_ct_t_u8 = u64s_to_contiguous_bytes(&outer_ct, pt_bits);
 
             let mut inner_ct = PolyMatrixRaw::zero(&params, 2, 1);
@@ -581,8 +572,6 @@ pub fn run_ypir_on_params<const K: usize>(
             inner_ct.data[lwe_params.n] = rescale(val, lwe_q_prime, lwe_params.modulus);
 
             debug!("decrypting inner ct...");
-            // let plaintext = decrypt_ct_reg_measured(y_client.client(), &params, &inner_ct.ntt(), 1);
-            // let final_result = plaintext.data[0];
             let inner_ct_as_u32 = inner_ct
                 .as_slice()
                 .iter()
@@ -595,7 +584,6 @@ pub fn run_ypir_on_params<const K: usize>(
             measurement.online.client_decode_time_ms = start_decode.elapsed().as_millis() as usize;
 
             debug!("got {}, expected {}", final_result, corr_result);
-            // debug!("was correct? {}", final_result == corr_result);
             assert_eq!(final_result, corr_result);
         }
 
@@ -630,10 +618,12 @@ pub fn run_ypir_on_params<const K: usize>(
     final_measurement
 }
 
+#[cfg(feature = "server")]
 fn mean(xs: &[usize]) -> f64 {
     xs.iter().map(|x| *x as f64).sum::<f64>() / xs.len() as f64
 }
 
+#[cfg(feature = "server")]
 fn std_dev(xs: &[usize]) -> f64 {
     let mean = mean(xs);
     let mut variance = 0.;
@@ -643,7 +633,7 @@ fn std_dev(xs: &[usize]) -> f64 {
     (variance / xs.len() as f64).sqrt()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod test {
     use super::*;
     use test_log::test;
