@@ -1217,30 +1217,5 @@ mod m512_impl {
     }
 }
 
-pub trait ToU64 {
-    fn to_u64(self) -> u64;
-}
-
-impl ToU64 for u8 {
-    fn to_u64(self) -> u64 {
-        self as u64
-    }
-}
-
-impl ToU64 for u16 {
-    fn to_u64(self) -> u64 {
-        self as u64
-    }
-}
-
-impl ToU64 for u32 {
-    fn to_u64(self) -> u64 {
-        self as u64
-    }
-}
-
-impl ToU64 for u64 {
-    fn to_u64(self) -> u64 {
-        self
-    }
-}
+// ToU64 is now defined in util.rs; re-export for backward compatibility
+pub use super::util::ToU64;

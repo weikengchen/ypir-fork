@@ -7,7 +7,7 @@
 
 use spiral_rs::{arith::barrett_coeff_u64, params::Params, poly::*};
 
-use crate::server::ToU64;
+use crate::util::ToU64;
 
 static DEFAULT_MODULI: [u64; 2] = [268369921u64, 249561089u64];
 

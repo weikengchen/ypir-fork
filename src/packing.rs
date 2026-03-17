@@ -1,15 +1,39 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-use std::time::Instant;
 
 use log::debug;
 
 use spiral_rs::{arith::*, gadget::*, ntt::*, params::*, poly::*};
 
+#[cfg(feature = "server")]
 use crate::server::Precomp;
 
 use super::util::*;
 
+// Timing shim: use std::time::Instant on native, dummy on wasm32
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy)]
+struct Instant;
+
+#[cfg(target_arch = "wasm32")]
+impl Instant {
+    fn now() -> Self { Instant }
+    fn elapsed(&self) -> DummyDuration { DummyDuration }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct DummyDuration;
+
+#[cfg(target_arch = "wasm32")]
+impl DummyDuration {
+    fn as_micros(&self) -> u128 { 0 }
+    fn as_millis(&self) -> u128 { 0 }
+}
+
+#[cfg(feature = "server")]
 fn homomorphic_automorph<'a>(
     params: &'a Params,
     t: usize,
@@ -45,6 +69,7 @@ fn homomorphic_automorph<'a>(
     &ct_auto_1_ntt.pad_top(1) + &w_times_ginv_ct
 }
 
+#[cfg(feature = "server")]
 pub fn pack_lwes_inner<'a>(
     params: &'a Params,
     ell: usize,
@@ -88,6 +113,7 @@ pub fn pack_lwes_inner<'a>(
     &ct_even + &ct_sum_1_automorphed
 }
 
+#[cfg(feature = "server")]
 fn pack_lwes_inner_non_recursive<'a>(
     params: &'a Params,
     ell: usize,
@@ -274,6 +300,7 @@ fn pack_lwes_inner_non_recursive<'a>(
     working_set[0].clone()
 }
 
+#[cfg(feature = "server")]
 pub fn precompute_pack<'a>(
     params: &'a Params,
     ell: usize,
@@ -415,6 +442,7 @@ pub fn precompute_pack<'a>(
     (working_set[0].clone(), res, tables)
 }
 
+#[cfg(feature = "server")]
 pub fn pack_using_precomp_vals<'a>(
     params: &'a Params,
     ell: usize,
@@ -583,6 +611,7 @@ pub fn pack_using_precomp_vals<'a>(
     out
 }
 
+#[cfg(feature = "server")]
 pub fn pack_single_lwe<'a>(
     params: &'a Params,
     pub_params: &[PolyMatrixNTT<'a>],
@@ -918,6 +947,7 @@ pub fn fast_reduce(res: &mut PolyMatrixNTT) {
     }
 }
 
+#[cfg(feature = "server")]
 pub fn combine<'a>(
     params: &'a Params,
     cur_ell: usize,
@@ -946,6 +976,7 @@ pub fn combine<'a>(
     add_into(ct_even, &ct_sum_1_automorphed);
 }
 
+#[cfg(feature = "server")]
 pub fn prep_pack_lwes<'a>(
     params: &'a Params,
     lwe_cts: &[u64],
@@ -979,6 +1010,7 @@ pub fn prep_pack_lwes<'a>(
     rlwe_cts
 }
 
+#[cfg(feature = "server")]
 pub fn prep_pack_many_lwes<'a>(
     params: &'a Params,
     lwe_cts: &[u64],
@@ -1007,6 +1039,7 @@ pub fn prep_pack_many_lwes<'a>(
     res
 }
 
+#[cfg(feature = "server")]
 pub fn prepare_packed_vals_pack_lwes<'a>(
     params: &'a Params,
     preped_rlwe_cts: &[PolyMatrixNTT<'a>],
@@ -1030,6 +1063,7 @@ pub fn prepare_packed_vals_pack_lwes<'a>(
 }
 
 /// Returns the `prep_packed_vals` value.
+#[cfg(feature = "server")]
 pub fn prep_pack_many_lwes_packed_vals<'a>(
     params: &'a Params,
     prep_rlwe_cts: &[Vec<PolyMatrixNTT<'a>>],
@@ -1052,6 +1086,7 @@ pub fn prep_pack_many_lwes_packed_vals<'a>(
     res
 }
 
+#[cfg(feature = "server")]
 pub fn pack_lwes<'a>(
     params: &'a Params,
     b_values: &[u64],
@@ -1092,6 +1127,7 @@ pub fn pack_lwes<'a>(
     res
 }
 
+#[cfg(feature = "server")]
 pub fn pack_many_lwes<'a>(
     params: &'a Params,
     prep_rlwe_cts: &[Vec<PolyMatrixNTT<'a>>],
@@ -1126,11 +1162,13 @@ pub fn pack_many_lwes<'a>(
     res
 }
 
+#[cfg(feature = "server")]
 fn rotation_poly<'a>(params: &'a Params, amount: usize) -> PolyMatrixNTT<'a> {
     let mut res = PolyMatrixRaw::zero(params, 1, 1);
     res.data[amount] = 1;
     res.ntt()
 }
+#[cfg(feature = "server")]
 pub fn pack_using_single_with_offset<'a>(
     params: &'a Params,
     pub_params: &[PolyMatrixNTT<'a>],
@@ -1281,7 +1319,7 @@ pub fn apply_automorph_ntt<'a>(
     // res
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod test {
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;

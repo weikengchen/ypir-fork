@@ -6,7 +6,7 @@ use spiral_rs::{arith::*, params::*};
 #[cfg(target_arch = "x86_64")]
 use super::server::ToM512;
 #[cfg(not(target_arch = "x86_64"))]
-use super::server::ToU64;
+use super::util::ToU64;
 
 #[cfg(target_arch = "x86_64")]
 pub fn fast_batched_dot_product_avx512<const K: usize, T: Copy>(
